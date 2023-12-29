@@ -6,8 +6,7 @@ use App\Interfaces\SignatureInterface;
 
 class SignatureService
 {
-    private $merchant_key = 'KaTf5tZYHx4v7pgZ';
-    private $requestData;
+    private array $requestData;
 
     /**
      * @param $requestData
@@ -17,8 +16,8 @@ class SignatureService
         $this->requestData = $requestData;
     }
 
-    public function makeSign()
+    public function makeSign(SignatureInterface $signature)
     {
-       // $signature->make();
+        return $signature->make($this->requestData);
     }
 }

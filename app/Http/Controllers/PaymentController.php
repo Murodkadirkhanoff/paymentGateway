@@ -2,46 +2,50 @@
 
 namespace App\Http\Controllers;
 
+use App\Factories\GatewayStrategyFactory;
 use App\Http\Requests\Gateway1Request;
 use App\Http\Requests\Gateway2Request;
+use App\Models\Payment;
 use App\Services\SignatureService;
+use App\Strategies\Signature\Gateway1Strategy;
+use App\Strategies\Signature\Gateway2Strategy;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
 class PaymentController extends Controller
 {
-    public function callbackUrl1(Gateway1Request $request)
+
+    public function callbackUrl(Request $request, $gateway): JsonResponse
     {
+        try {
+            $gatewayStrategy = GatewayStrategyFactory::make($gateway);
 
-        $data = $request->except('sign');
+            $data = $gatewayStrategy->getRequestParams();
+            $signature = (new SignatureService($data))->makeSign($gatewayStrategy);
 
+            if ($signature !== $request->sign) {
+                throw new \Exception('Callback signature verification failed');
+            }
 
+            $payment = $gatewayStrategy->getModel();
+            if (!$gatewayStrategy->checkLimit()) {
+                throw new \Exception("Limit exceeded for $gateway");
+            }
 
-        $signature = (new SignatureService($data))->makeSign();
+            $payment->update(['status' => $request->status]);
+            Log::info("Callback received and verified for $gateway: " . json_encode($data));
 
-        if($signature == request()->get('sign')){
-            Log::info('Gateway 1 Callback received and verified: ' . json_encode($data));
-            $data['amount'] = $data['amount'] * 100; // dollar to cent
-            $data['amount_paid'] = $data['amount_paid'] * 100; // dollar to cent
-        }else {
-            // Signature verification failed
-            Log::warning('Gateway 1 Callback signature verification failed: ' . json_encode($data));
-        }
-    }
-
-    public function callbackUrl2(Gateway2Request $request)
-    {
-        $data = $request->except('sign');
-
-        $signature = (new SignatureService())->makeSign($data);
-
-        if($signature == request()->get('sign')){
-            Log::info('Gateway 1 Callback received and verified: ' . json_encode($data));
-            $data['amount'] = $data['amount'] * 100; // dollar to cent
-            $data['amount_paid'] = $data['amount_paid'] * 100; // dollar to cent
-        }else {
-            // Signature verification failed
-            Log::warning('Gateway 1 Callback signature verification failed: ' . json_encode($data));
+            return response()->json([
+                'success' => true,
+                'data' => $payment
+            ]);
+        } catch (\Exception $e) {
+            Log::warning($e->getMessage());
+            return response()->json([
+                'success' => false,
+                'data' => $e->getMessage()
+            ]);
         }
     }
 }

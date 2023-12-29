@@ -2,35 +2,58 @@
 
 namespace App\Strategies\Signature;
 
+use App\Helpers\PaymentStatus;
 use App\Interfaces\SignatureInterface;
+use App\Models\Payment;
 
-class Gateway1Strategy implements SignatureInterface
+class Gateway1Strategy extends BaseGatewayStrategy implements SignatureInterface
 {
-
     private string $merchant_key;
+    private Payment $payment;
 
-    /**
-     * @param string $merchant_key
-     */
-    public function __construct(string $merchant_key)
+    public function __construct()
     {
+        $this->payment = Payment::where('id', request()->get('payment_id'))->first();
         $this->merchant_key = '$merchant_key';
     }
 
     public function make($data)
     {
-        // Sort the array by keys
-        ksort($data);
+        $stringToHash = $this->implode(data: $data, separator: ':', item: $this->merchant_key);
+        // Parse to hash sha256
+        return hash('sha256', $stringToHash);
+    }
 
-        // Extract values from the array
-        $values = array_values($data);
+    public function getRequestParams()
+    {
+        request()->validate([
+            'merchant_id' => 'required',
+            'payment_id' => 'required',
+            'status' => 'required|in:new,pending,completed,expired,rejected',
+            'amount' => 'required',
+            'amount_paid' => 'required',
+            'timestamp' => 'required',
+            'sign' => 'required',
+        ]);
 
-        // Concatenate values with ':'
-        $stringToHash = implode(':', $values);
-        $stringToHash = $stringToHash . ":$this->merchant_key";
-        // Calculate SHA256 hash
-        $result = hash('sha256', $stringToHash);
+        return request()->except('sign');
+    }
 
-        return $result;
+    public function getModel()
+    {
+        return $this->payment;
+    }
+
+    public function checkLimit()
+    {
+        $status = request()->get('status');
+        $merchant_id = request()->get('merchant_id');
+        if ($status !== PaymentStatus::STATUS_COMPLETED) {
+            return true; // Handle case where status is not 'completed'
+        }
+
+        $totalAmountPaid = Payment::getTotalAmountPaidForGatewayWithinDay(gatewayType: Payment::GATEWAY1, status: $status, merchant_id:$merchant_id);
+
+        return $totalAmountPaid < Payment::PAYMENT_DAILY_LIMIT;
     }
 }
